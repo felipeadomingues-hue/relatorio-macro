@@ -12920,7 +12920,7 @@ function initFocusVsIpcaTab() {
     try {
       // API BCB não aceita /ultimos/N — precisa de dataInicial/dataFinal
       const hoje = new Date();
-      const dataIni = new Date(hoje.getFullYear()-3, 0, 1); // 3 anos atrás
+      const dataIni = new Date(2026, 0, 2); // busca apenas a partir do último dado hardcoded (01/01/2026)
       const fmtDt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
       const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados?formato=json&dataInicial=${fmtDt(dataIni)}&dataFinal=${fmtDt(hoje)}`;
       const dados = await buscarJSON(url);
@@ -13217,10 +13217,11 @@ function initFocusVsIpcaTab() {
       const hoje = new Date();
       const fmtDt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
 
-      // Busca histórico completo desde 1997 para reconstruir todas as decisões do COPOM
-      const dataIni = new Date(1997, 0, 1);
+      // Busca últimos 5 anos — suficiente para detectar decisões recentes do COPOM
+      // Janela menor evita erro 406 / timeout nos proxies CORS
+      const dataIni = new Date(2026, 2, 19); // busca apenas a partir da última decisão hardcoded (18/03/2026)
       const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json&dataInicial=${fmtDt(dataIni)}&dataFinal=${fmtDt(hoje)}`;
-      const serie = await buscarJSON(url, 30000);
+      const serie = await buscarJSON(url, 20000);
       if (!Array.isArray(serie) || serie.length === 0) throw new Error('sem dados');
 
       // Extrair decisões: cada vez que o valor muda, é uma decisão do COPOM
@@ -13333,7 +13334,7 @@ function initFocusVsIpcaTab() {
       // para evitar problemas de encoding/acentuação). Depois separamos por nome no JS.
       // Pega-se um período recente para limitar o volume — últimos 90 dias bastam para o último boletim.
       const hoje = new Date();
-      const dataIniIso = new Date(hoje.getTime() - 400 * 86400000).toISOString().substring(0, 10);
+      const dataIniIso = '2026-04-18'; // busca apenas a partir do último boletim hardcoded (17/04/2026)
       // OData: filter Data >= inicio
       const filtroBase = `baseCalculo eq 0 and Data ge '${dataIniIso}'`;
       const url = `${base}?$top=10000&$orderby=Data desc&$format=json&$select=Indicador,IndicadorDetalhe,Data,DataReferencia,Mediana&$filter=${encodeURIComponent(filtroBase)}`;
@@ -13410,21 +13411,23 @@ function initFocusVsIpcaTab() {
       };
 
       // Estratégia: usa a UNIÃO de SELIC + Câmbio + IPCA como âncora de datas de boletim.
-      // Filtra apenas sextas-feiras (dia 5) pois o Focus é publicado semanalmente às sextas.
-      const ehSexta = (iso) => new Date(iso + 'T12:00:00').getDay() === 5;
+      // Filtra quintas (4) e sextas (5): o BCB publica o Focus normalmente na segunda,
+      // mas os dados aparecem na API com a data de quinta ou sexta da semana de referencia.
+      // Quando ha feriado, pode ser publicado na quinta em vez da sexta.
+      const ehQuintaOuSexta = (iso) => { const d = new Date(iso + 'T12:00:00').getDay(); return d === 4 || d === 5; };
 
       const unirDatas = (filtroCambio, filtroSelic) => {
         const cb = datasComLeitura('CAMBIO', anoAtual, filtroCambio);
         const sl = datasComLeitura('SELIC',  anoAtual, filtroSelic);
         const ip = datasComLeitura('IPCA',   anoAtual, false);
         const todas = [...new Set([...cb, ...sl, ...ip])].sort();
-        // Filtra apenas sextas; se não houver nenhuma, retorna todas (fallback)
-        const sextas = todas.filter(ehSexta);
-        return sextas.length > 0 ? sextas : todas;
+        // Filtra quintas e sextas; se nao houver nenhuma, retorna todas (fallback)
+        const filtradas = todas.filter(ehQuintaOuSexta);
+        return filtradas.length > 0 ? filtradas : todas;
       };
 
       let datasBoletim = unirDatas(true, true);
-      let modoUsado = 'sextas (CAMBIO+SELIC+IPCA fim do ano)';
+      let modoUsado = 'quinta-sexta (CAMBIO+SELIC+IPCA fim do ano)';
       if (datasBoletim.length === 0) {
         datasBoletim = unirDatas(false, false);
         modoUsado = 'sextas relaxado (qualquer detalhe)';
