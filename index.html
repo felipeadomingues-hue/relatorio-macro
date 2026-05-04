@@ -13253,31 +13253,38 @@ function initFocusVsIpcaTab() {
       // Reconstrói a tabela de decisões a partir dos dados da API
       const tbody = document.getElementById('selic-tbody');
       if (tbody) {
-        // Identifica quais datas já estão na tabela hardcoded
-        const datasNaTabela = new Set();
-        tbody.querySelectorAll('tr').forEach(tr => {
-          const cell = tr.querySelector('.date') || tr.cells[0];
-          if (cell) datasNaTabela.add(cell.textContent.trim());
-        });
+        // Pega o valor da última linha hardcoded para calcular variação correta
+        const primeiraLinha = tbody.querySelector('tr');
+        const valorHardcoded = primeiraLinha
+          ? parseFloat(primeiraLinha.querySelector('.taxa').textContent.replace(',', '.'))
+          : null;
 
-        // Insere no topo apenas as decisões que ainda não estão na tabela
+        // Filtra apenas decisões onde o valor realmente mudou em relação ao último hardcoded
+        // Isso evita que o primeiro dia da busca (mesmo valor) apareça como decisão
+        const novasDecisoes = decisoes.filter(d =>
+          valorHardcoded === null || Math.abs(d.valor - valorHardcoded) > 0.001
+        );
+
+        // Ordena por data decrescente (mais recente primeiro) para inserir corretamente
+        const parseDtBR = (s) => { const [d,m,a] = s.split('/'); return new Date(+a,+m-1,+d); };
+        novasDecisoes.sort((a, b) => parseDtBR(b.data) - parseDtBR(a.data));
+
         let inseridas = 0;
-        for (const d of decisoes) {
-          if (datasNaTabela.has(d.data)) break; // chegou nas que já existem
-          const variacao = d.anterior !== null ? d.valor - d.anterior : 0;
+        for (const d of novasDecisoes) {
+          // Calcula variação em relação ao valor hardcoded anterior
+          const variacaoRef = valorHardcoded !== null ? d.valor - valorHardcoded : 0;
           let varClass = 'manut', varText = '— mantida';
-          if (variacao > 0.001) {
+          if (variacaoRef > 0.001) {
             varClass = 'alta';
-            varText = '\u25B2 +' + fmtBR(variacao, 2) + ' p.p.';
-          } else if (variacao < -0.001) {
+            varText = '\u25B2 +' + fmtBR(variacaoRef, 2) + ' p.p.';
+          } else if (variacaoRef < -0.001) {
             varClass = 'baixa';
-            varText = '\u25BC \u2212' + fmtBR(Math.abs(variacao), 2) + ' p.p.';
+            varText = '\u25BC \u2212' + fmtBR(Math.abs(variacaoRef), 2) + ' p.p.';
           }
           const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td class="date">${d.data}</td>
-            <td class="num taxa">${fmtBR(d.valor, 2)}<span class="unit">%</span></td>
-            <td class="num ${varClass}">${varText}</td>`;
+          tr.innerHTML = '<td class="date">' + d.data + '</td>' +
+            '<td class="num taxa">' + fmtBR(d.valor, 2) + '<span class="unit">%</span></td>' +
+            '<td class="num ' + varClass + '">' + varText + '</td>';
           tbody.insertBefore(tr, tbody.firstChild);
           inseridas++;
         }
